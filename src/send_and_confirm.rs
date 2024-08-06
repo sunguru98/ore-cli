@@ -27,7 +27,7 @@ const _SIMULATION_RETRIES: usize = 4;
 const GATEWAY_RETRIES: usize = 150;
 const CONFIRM_RETRIES: usize = 1;
 
-const CONFIRM_DELAY: u64 = 0;
+const CONFIRM_DELAY: u64 = 7000;
 const GATEWAY_DELAY: u64 = 300;
 
 pub enum ComputeBudget {
@@ -70,16 +70,14 @@ impl Miner {
             }
         }
 
-        let priority_fee = match &self.dynamic_fee_url {
-            Some(_) => {
-                self.dynamic_fee().await
-            }
-            None => {
-                self.priority_fee.unwrap_or(0)
-            }
+        let mut priority_fee = match &self.dynamic_fee_url {
+            Some(_) => self.dynamic_fee().await,
+            None => self.priority_fee.unwrap_or(0),
         };
 
-        final_ixs.push(ComputeBudgetInstruction::set_compute_unit_price(priority_fee));
+        final_ixs.push(ComputeBudgetInstruction::set_compute_unit_price(
+            priority_fee,
+        ));
         final_ixs.extend_from_slice(ixs);
 
         // Build tx
@@ -102,10 +100,18 @@ impl Miner {
         // Submit tx
         let mut attempts = 0;
         loop {
-
+            // print!("{:?}", tx.message.instructions);
             let message = match &self.dynamic_fee_url {
-                Some(_) => format!("Submitting transaction... (attempt {} with dynamic priority fee of {} via {})", attempts, priority_fee, self.dynamic_fee_strategy.as_ref().unwrap()),
-                None => format!("Submitting transaction... (attempt {} with static priority fee of {})", attempts, priority_fee),
+                Some(_) => format!(
+                    "Submitting transaction... (attempt {} with dynamic priority fee of {} via {})",
+                    attempts,
+                    priority_fee,
+                    self.dynamic_fee_strategy.as_ref().unwrap()
+                ),
+                None => format!(
+                    "Submitting transaction... (attempt {} with static priority fee of {})",
+                    attempts, priority_fee
+                ),
             };
 
             progress_bar.set_message(message);
@@ -123,8 +129,11 @@ impl Miner {
                         std::thread::sleep(Duration::from_millis(CONFIRM_DELAY));
                         match client.get_signature_statuses(&[sig]).await {
                             Ok(signature_statuses) => {
+                                // println!("Success? {:?}", signature_statuses);
+                                // println!("{:?}", sig);
                                 for status in signature_statuses.value {
                                     if let Some(status) = status {
+                                        // println!("{:?}", status);
                                         if let Some(err) = status.err {
                                             progress_bar.finish_with_message(format!(
                                                 "{}: {}",
@@ -137,6 +146,7 @@ impl Miner {
                                             });
                                         }
                                         if let Some(confirmation) = status.confirmation_status {
+                                            // print!("{:?}", confirmation);
                                             match confirmation {
                                                 TransactionConfirmationStatus::Processed => {}
                                                 TransactionConfirmationStatus::Confirmed
@@ -146,6 +156,7 @@ impl Miner {
                                                         "OK".bold().green(),
                                                         sig
                                                     ));
+                                                    // println!("Done?");
                                                     return Ok(sig);
                                                 }
                                             }
@@ -156,6 +167,7 @@ impl Miner {
 
                             // Handle confirmation errors
                             Err(err) => {
+                                // println!("Not Success?");
                                 progress_bar.set_message(format!(
                                     "{}: {}",
                                     "ERROR".bold().red(),
@@ -185,6 +197,33 @@ impl Miner {
                     request: None,
                     kind: ClientErrorKind::Custom("Max retries".into()),
                 });
+            } else {
+                final_ixs = vec![];
+                match compute_budget {
+                    ComputeBudget::Dynamic => {
+                        // TODO simulate
+                        final_ixs.push(ComputeBudgetInstruction::set_compute_unit_limit(1_400_000))
+                    }
+                    ComputeBudget::Fixed(cus) => {
+                        final_ixs.push(ComputeBudgetInstruction::set_compute_unit_limit(cus))
+                    }
+                }
+
+                priority_fee = match &self.dynamic_fee_url {
+                    Some(_) => self.dynamic_fee().await,
+                    None => self.priority_fee.unwrap_or(0),
+                };
+
+                final_ixs.push(ComputeBudgetInstruction::set_compute_unit_price(
+                    priority_fee,
+                ));
+                final_ixs.extend_from_slice(ixs);
+                tx = Transaction::new_with_payer(&final_ixs, Some(&signer.pubkey()));
+                let (hash, _slot) = client
+                    .get_latest_blockhash_with_commitment(self.rpc_client.commitment())
+                    .await
+                    .unwrap();
+                tx.sign(&[&signer], hash);
             }
         }
     }
