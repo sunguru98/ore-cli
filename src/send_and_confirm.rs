@@ -41,6 +41,7 @@ impl Miner {
         ixs: &[Instruction],
         compute_budget: ComputeBudget,
         skip_confirm: bool,
+        difficulty: Option<u32>,
     ) -> ClientResult<Signature> {
         let progress_bar = spinner::new_progress_bar();
         let signer = self.signer();
@@ -71,7 +72,7 @@ impl Miner {
         }
 
         let mut priority_fee = match &self.dynamic_fee_url {
-            Some(_) => self.dynamic_fee().await,
+            Some(_) => self.dynamic_fee(difficulty).await,
             None => self.priority_fee.unwrap_or(0),
         };
 
@@ -210,7 +211,7 @@ impl Miner {
                 }
 
                 priority_fee = match &self.dynamic_fee_url {
-                    Some(_) => self.dynamic_fee().await,
+                    Some(_) => self.dynamic_fee(difficulty).await,
                     None => self.priority_fee.unwrap_or(0),
                 };
 

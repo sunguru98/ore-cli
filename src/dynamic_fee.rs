@@ -5,11 +5,25 @@ use reqwest::Client;
 use serde_json::{json, Value};
 
 impl Miner {
-    pub async fn dynamic_fee(&self) -> u64 {
+    pub async fn dynamic_fee(&self, difficulty: Option<u32>) -> u64 {
         let ore_addresses: Vec<String> =
             std::iter::once("oreV2ZymfyeXgNgBdqMkumTqqAprVqgBWQfoYkrtKWQ".to_string())
                 .chain(BUS_ADDRESSES.iter().map(|pubkey| pubkey.to_string()))
                 .collect();
+
+        let priority_level = if let Some(difficulty) = difficulty {
+            if difficulty < 10 {
+                "Low"
+            } else if difficulty > 10 && difficulty < 15 {
+                "Medium"
+            } else if difficulty > 15 && difficulty < 18 {
+                "High"
+            } else {
+                "VeryHigh"
+            }
+        } else {
+            "Medium"
+        };
 
         match &self.dynamic_fee_strategy {
             None => self.priority_fee.unwrap_or(0),
@@ -25,7 +39,7 @@ impl Miner {
                             "params": [{
                                 "accountKeys": ore_addresses,
                                 "options": {
-                                    "priorityLevel": "VeryHigh"
+                                    "priorityLevel": priority_level
                                 }
                             }]
                         })
